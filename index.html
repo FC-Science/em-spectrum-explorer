@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>EM Spectrum Explorer</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Space+Grotesk:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg: #02040a;
+  --surface: #080d18;
+  --surface2: #0d1525;
+  --border: rgba(255,255,255,0.07);
+  --text: #e8eaf0;
+  --muted: #4a5568;
+  --accent: #4f8dff;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Space Grotesk', sans-serif;
+  overflow-x: hidden;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 1; opacity: 0.3;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+}
+#bg-canvas { position:fixed; inset:0; pointer-events:none; z-index:0; }
+#app { position:relative; z-index:2; max-width:980px; margin:0 auto; padding:0 18px 60px; }
+
+/* HEADER */
+.header { text-align:center; padding:50px 0 28px; }
+.eyebrow {
+  font-family:'JetBrains Mono',monospace;
+  font-size:0.65rem; letter-spacing:0.35em; color:var(--muted);
+  text-transform:uppercase; margin-bottom:14px;
+}
+.title-main {
+  font-family:'Syne',sans-serif; font-size:clamp(2rem,6vw,3.6rem);
+  font-weight:800; line-height:0.92; letter-spacing:-0.02em; margin-bottom:18px;
+}
+.title-main .t1 { display:block; color:#fff; }
+.title-main .t2 {
+  display:block;
+  background:linear-gradient(120deg,#4f8dff 0%,#a78bfa 40%,#f472b6 70%,#fb923c 100%);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.stats-row { display:flex; justify-content:center; gap:10px; flex-wrap:wrap; margin-top:18px; }
+.stat-chip {
+  font-family:'JetBrains Mono',monospace; font-size:0.7rem;
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:100px; padding:5px 16px; color:#94a3b8; transition:all 0.3s;
+}
+.stat-chip.lit { border-color:rgba(79,141,255,0.4); color:#93c5fd; background:rgba(79,141,255,0.08); }
+
+/* TABS */
+.tabs {
+  display:flex; justify-content:center; gap:4px; margin-bottom:32px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; padding:5px; width:fit-content; margin-left:auto; margin-right:auto;
+}
+.tab-btn {
+  font-family:'Syne',sans-serif; font-size:0.78rem; font-weight:700;
+  letter-spacing:0.08em; padding:9px 26px; border-radius:10px; border:none;
+  cursor:pointer; transition:all 0.25s; color:var(--muted); background:transparent;
+}
+.tab-btn.active { background:#fff; color:#0a0f1e; box-shadow:0 2px 14px rgba(0,0,0,0.5); }
+
+/* SPECTRUM RULER */
+.ruler-bar {
+  height:8px; border-radius:100px; margin-bottom:6px;
+  background:linear-gradient(to right,#6d28d9,#2563eb,#06b6d4,#16a34a,#ca8a04,#ea580c,#ff0000,#ff8800,#ffff00,#00ff00,#0000ff,#8b00ff,#c026d3,#4f46e5,#0e7490);
+}
+.ruler-labels { display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:0.56rem; color:var(--muted); margin-bottom:22px; }
+
+/* WAVE GRID */
+.wave-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-bottom:26px; }
+.wave-card {
+  border:1px solid var(--border); border-radius:14px; padding:14px 7px 11px;
+  text-align:center; cursor:pointer; background:var(--surface);
+  transition:all 0.3s cubic-bezier(.4,0,.2,1); position:relative; overflow:hidden;
+}
+.wave-card:hover { transform:translateY(-5px) scale(1.02); }
+.wave-card.selected { transform:translateY(-7px) scale(1.03); }
+.wc-icon { font-size:1.55rem; margin-bottom:5px; display:block; transition:transform 0.3s; }
+.wave-card:hover .wc-icon, .wave-card.selected .wc-icon { transform:scale(1.2); }
+.wc-name { font-family:'Syne',sans-serif; font-size:0.5rem; font-weight:700; letter-spacing:0.06em; line-height:1.3; text-transform:uppercase; }
+.wc-dot { width:5px; height:5px; border-radius:50%; margin:5px auto 0; background:#22c55e; opacity:0; transition:opacity 0.3s; }
+.wc-dot.show { opacity:1; }
+
+/* DETAIL PANEL */
+.detail-panel {
+  border-radius:20px; padding:26px; position:relative; overflow:hidden;
+  animation:slideUp 0.4s cubic-bezier(.4,0,.2,1);
+}
+@keyframes slideUp { from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:translateY(0)} }
+.detail-header { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:20px; flex-wrap:wrap; }
+.dh-left { display:flex; align-items:center; gap:12px; }
+.big-icon { font-size:2.8rem; animation:iconPulse 3s ease-in-out infinite; }
+@keyframes iconPulse { 0%,100%{filter:drop-shadow(0 0 10px currentColor)} 50%{filter:drop-shadow(0 0 22px currentColor)} }
+.detail-name { font-family:'Syne',sans-serif; font-size:1.7rem; font-weight:800; letter-spacing:-0.02em; line-height:1; margin-bottom:3px; }
+.detail-disc { font-family:'JetBrains Mono',monospace; font-size:0.63rem; color:var(--muted); }
+.danger-badge { border-radius:100px; padding:5px 14px; font-family:'JetBrains Mono',monospace; font-size:0.63rem; border:1px solid; white-space:nowrap; align-self:flex-start; margin-top:4px; }
+
+/* WAVE STRIP */
+.wave-strip { height:58px; border-radius:10px; background:rgba(0,0,0,0.3); margin-bottom:18px; overflow:hidden; }
+.wave-strip canvas { width:100%; height:100%; display:block; }
+
+/* PROPS */
+.props-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:9px; margin-bottom:18px; }
+.prop-card { background:rgba(0,0,0,0.35); border:1px solid var(--border); border-radius:12px; padding:11px 13px; }
+.prop-label { font-family:'JetBrains Mono',monospace; font-size:0.52rem; color:var(--muted); letter-spacing:0.2em; text-transform:uppercase; margin-bottom:4px; }
+.prop-value { font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:#e2e8f0; line-height:1.4; }
+
+/* BOTTOM GRID */
+.bottom-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.use-item { display:flex; align-items:center; gap:9px; padding:8px 0; border-bottom:1px solid var(--border); font-size:0.83rem; color:#cbd5e1; }
+.use-item:last-child { border-bottom:none; }
+.use-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.fact-card { background:rgba(0,0,0,0.35); border:1px solid var(--border); border-radius:12px; padding:15px; }
+.fact-label { font-family:'Syne',sans-serif; font-size:0.58rem; letter-spacing:0.2em; color:var(--muted); margin-bottom:9px; text-transform:uppercase; }
+.fact-text { font-size:0.81rem; color:#94a3b8; line-height:1.7; font-style:italic; }
+
+.placeholder { text-align:center; padding:58px 20px; border:1px dashed rgba(255,255,255,0.09); border-radius:20px; color:var(--muted); }
+.p-arrow { font-size:2.5rem; margin-bottom:10px; animation:bounce 2s ease-in-out infinite; }
+@keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+
+/* COMPARE */
+.compare-wrap { overflow-x:auto; border-radius:16px; border:1px solid var(--border); margin-bottom:22px; }
+table { width:100%; border-collapse:collapse; font-size:0.77rem; }
+thead { background:var(--surface2); }
+th { padding:12px 15px; text-align:left; font-family:'Syne',sans-serif; font-size:0.6rem; letter-spacing:0.15em; color:var(--muted); text-transform:uppercase; border-bottom:1px solid var(--border); white-space:nowrap; }
+td { padding:12px 15px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+tbody tr:hover { background:rgba(255,255,255,0.025); }
+.eq-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:11px; }
+.eq-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:17px; display:flex; gap:13px; align-items:center; }
+.eq-f { font-family:'JetBrains Mono',monospace; font-size:1.05rem; font-weight:600; color:#60a5fa; background:rgba(96,165,250,0.1); border:1px solid rgba(96,165,250,0.2); border-radius:8px; padding:6px 14px; white-space:nowrap; min-width:88px; text-align:center; }
+.eq-d { font-size:0.81rem; color:#94a3b8; line-height:1.5; }
+
+/* QUIZ */
+.quiz-wrap { max-width:640px; margin:0 auto; }
+.qhdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+.q-counter { font-family:'JetBrains Mono',monospace; font-size:0.68rem; color:var(--muted); }
+.q-live-score { font-family:'Syne',sans-serif; font-size:0.82rem; font-weight:700; color:#60a5fa; }
+.q-progress { height:3px; background:var(--surface2); border-radius:100px; margin-bottom:24px; overflow:hidden; }
+.q-prog-fill { height:100%; background:linear-gradient(90deg,#4f8dff,#a78bfa); border-radius:100px; transition:width 0.5s cubic-bezier(.4,0,.2,1); }
+.diff-badge { display:inline-flex; align-items:center; gap:5px; font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.1em; padding:3px 10px; border-radius:100px; margin-bottom:12px; }
+.diff-easy { background:rgba(34,197,94,0.1); color:#22c55e; border:1px solid rgba(34,197,94,0.25); }
+.diff-medium { background:rgba(251,191,36,0.1); color:#fbbf24; border:1px solid rgba(251,191,36,0.25); }
+.diff-hard { background:rgba(239,68,68,0.1); color:#ef4444; border:1px solid rgba(239,68,68,0.25); }
+.q-question { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px 22px; margin-bottom:16px; font-size:0.98rem; font-weight:500; line-height:1.65; color:#e8eaf0; }
+.q-opts { display:grid; gap:8px; }
+.q-opt {
+  background:var(--surface); border:1.5px solid var(--border); border-radius:11px;
+  padding:12px 17px; font-family:'Space Grotesk',sans-serif; font-size:0.88rem;
+  color:#cbd5e1; cursor:pointer; text-align:left; transition:all 0.2s;
+  display:flex; align-items:center; gap:11px; width:100%;
+}
+.q-opt:hover:not(:disabled) { border-color:rgba(79,141,255,0.5); background:rgba(79,141,255,0.06); color:#e8eaf0; transform:translateX(3px); }
+.opt-let { font-family:'JetBrains Mono',monospace; font-size:0.68rem; width:21px; height:21px; border-radius:6px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.06); flex-shrink:0; color:var(--muted); transition:all 0.2s; }
+.q-opt:hover:not(:disabled) .opt-let { background:rgba(79,141,255,0.2); color:#93c5fd; }
+.q-opt.correct { border-color:#22c55e !important; background:rgba(34,197,94,0.08) !important; color:#86efac !important; }
+.q-opt.correct .opt-let { background:rgba(34,197,94,0.2); color:#22c55e; }
+.q-opt.wrong { border-color:#ef4444 !important; background:rgba(239,68,68,0.08) !important; color:#fca5a5 !important; }
+.q-opt.wrong .opt-let { background:rgba(239,68,68,0.2); color:#ef4444; }
+.q-opt:disabled { cursor:default; }
+.q-explain { background:rgba(79,141,255,0.06); border:1px solid rgba(79,141,255,0.2); border-radius:11px; padding:13px 17px; font-size:0.81rem; color:#93c5fd; line-height:1.65; margin-top:11px; animation:slideUp 0.3s ease; }
+.q-next { margin-top:16px; float:right; font-family:'Syne',sans-serif; font-size:0.8rem; font-weight:700; letter-spacing:0.08em; background:linear-gradient(135deg,#4f8dff,#7c3aed); color:white; border:none; border-radius:10px; padding:10px 24px; cursor:pointer; transition:all 0.2s; box-shadow:0 4px 18px rgba(79,141,255,0.3); }
+.q-next:hover { transform:translateY(-2px); box-shadow:0 6px 26px rgba(79,141,255,0.4); }
+.results-card { text-align:center; background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:46px 30px; animation:slideUp 0.5s ease; }
+.res-emoji { font-size:4rem; margin-bottom:14px; }
+.res-score { font-family:'Syne',sans-serif; font-size:4rem; font-weight:800; background:linear-gradient(135deg,#4f8dff,#a78bfa); -webkit-background-clip:text; -webkit-text-fill-color:transparent; line-height:1; margin-bottom:6px; }
+.res-label { color:var(--muted); font-size:0.88rem; margin-bottom:22px; }
+.res-msg { color:#94a3b8; font-size:0.92rem; line-height:1.6; max-width:400px; margin:0 auto 26px; }
+.retry-btn { font-family:'Syne',sans-serif; font-size:0.83rem; font-weight:700; letter-spacing:0.08em; background:var(--surface2); color:#e2e8f0; border:1px solid var(--border); border-radius:10px; padding:11px 30px; cursor:pointer; transition:all 0.2s; }
+.retry-btn:hover { background:rgba(79,141,255,0.1); border-color:rgba(79,141,255,0.4); color:#93c5fd; }
+
+.sec-label { font-family:'JetBrains Mono',monospace; font-size:0.58rem; letter-spacing:0.25em; color:var(--muted); text-transform:uppercase; margin-bottom:13px; }
+.tab-panel { display:none; }
+.tab-panel.active { display:block; }
+
+@media(max-width:620px){
+  .wave-grid{grid-template-columns:repeat(4,1fr)!important;}
+  .bottom-grid{grid-template-columns:1fr!important;}
+  .props-grid{grid-template-columns:1fr 1fr!important;}
+}
+</style>
+</head>
+<body>
+<canvas id="bg-canvas"></canvas>
+<div id="app">
+
+  <div class="header">
+    <div class="eyebrow">Interactive Physics Lab &nbsp;·&nbsp; Grades 9–12</div>
+    <div class="title-main">
+      <span class="t1">Electromagnetic</span>
+      <span class="t2">Spectrum</span>
+    </div>
+    <div class="stats-row">
+      <div class="stat-chip" id="chip-disc">🔭 0 / 7 discovered</div>
+      <div class="stat-chip" id="chip-score">🧠 Quiz: 0 / 10</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" id="tab-explore" onclick="switchTab('explore')">Explore</button>
+    <button class="tab-btn" id="tab-compare" onclick="switchTab('compare')">Compare</button>
+    <button class="tab-btn" id="tab-quiz" onclick="switchTab('quiz')">Quiz</button>
+  </div>
+
+  <!-- EXPLORE -->
+  <div class="tab-panel active" id="panel-explore">
+    <div class="ruler-bar"></div>
+    <div class="ruler-labels"><span>← Low energy · Long λ · Low ν</span><span>High energy · Short λ · High ν →</span></div>
+    <div class="wave-grid" id="wave-grid"></div>
+    <div class="placeholder" id="placeholder">
+      <div class="p-arrow">👆</div>
+      <div style="font-family:'Syne',sans-serif;font-size:1rem;font-weight:700;color:#334155;margin-bottom:5px;">Select a wave type above</div>
+      <div style="font-size:0.8rem;">Click any band to explore its physics, applications, and history</div>
+    </div>
+    <div id="detail-panel" style="display:none;"></div>
+  </div>
+
+  <!-- COMPARE -->
+  <div class="tab-panel" id="panel-compare">
+    <div class="sec-label">Full Spectrum Comparison</div>
+    <div class="compare-wrap">
+      <table><thead><tr><th>Band</th><th>Wavelength</th><th>Frequency</th><th>Photon Energy</th><th>Hazard</th><th>Primary Application</th></tr></thead>
+      <tbody id="compare-tbody"></tbody></table>
+    </div>
+    <div class="sec-label" style="margin-top:26px;">Core Equations</div>
+    <div class="eq-row">
+      <div class="eq-card"><div class="eq-f">c = λν</div><div class="eq-d">Speed of light = Wavelength × Frequency<br><span style="font-size:0.73rem;color:#64748b;">c = 3×10⁸ m/s in vacuum</span></div></div>
+      <div class="eq-card"><div class="eq-f">E = hν</div><div class="eq-d">Energy = Planck's constant × Frequency<br><span style="font-size:0.73rem;color:#64748b;">h = 6.626×10⁻³⁴ J·s</span></div></div>
+      <div class="eq-card"><div class="eq-f">E = hc/λ</div><div class="eq-d">Energy inversely proportional to wavelength<br><span style="font-size:0.73rem;color:#64748b;">Shorter λ → higher E</span></div></div>
+    </div>
+  </div>
+
+  <!-- QUIZ -->
+  <div class="tab-panel" id="panel-quiz">
+    <div class="quiz-wrap" id="quiz-wrap"></div>
+  </div>
+
+</div>
+
+<script>
+const SPECTRUM = [
+  { id:'radio', name:'Radio Waves', icon:'📡', color:'#8b5cf6', glow:'#7c3aed', wl:'>1 m', freq:'<300 MHz', energy:'<1.24 μeV', danger:'Non-ionizing · Safe', dc:'#22c55e', disc:'1887 — Heinrich Hertz', src:'Pulsars, lightning, galactic emissions', uses:['AM/FM & TV broadcasts','WiFi, Bluetooth & 5G','MRI scanners in hospitals','Radio astronomy & SETI'], fact:'Fast Radio Bursts (FRBs) from deep space last milliseconds yet release more energy than the Sun emits in 3 days. The first was discovered in archived data in 2007 — detected years after it occurred.', wfreq:0.10 },
+  { id:'microwave', name:'Microwaves', icon:'📶', color:'#06b6d4', glow:'#0891b2', wl:'1 mm – 1 m', freq:'300 MHz – 300 GHz', energy:'1.24 μeV – 1.24 meV', danger:'Safe at low levels', dc:'#86efac', disc:'1864 (Maxwell), 1930s (practical)', src:'Cosmic Microwave Background, molecular gas', uses:['Microwave ovens (2.45 GHz)','Radar & weather systems','Satellite communications','CMB cosmology research'], fact:"The Cosmic Microwave Background fills the entire universe as microwave radiation — the afterglow of the Big Bang. About 1% of old TV static was CMB photons from 380,000 years after the universe's birth.", wfreq:0.38 },
+  { id:'infrared', name:'Infrared', icon:'🌡️', color:'#f97316', glow:'#ea580c', wl:'700 nm – 1 mm', freq:'300 GHz – 430 THz', energy:'1.24 meV – 1.77 eV', danger:'Burns at high intensity', dc:'#fbbf24', disc:'1800 — William Herschel', src:'Sun, warm bodies, volcanoes', uses:['Thermal / night-vision cameras','TV & device remote controls','James Webb Space Telescope','Fiber optic data transmission'], fact:"The James Webb Space Telescope observes entirely in infrared — letting it see galaxies formed just 300 million years after the Big Bang, redshifted far beyond visible light. Pit vipers 'see' infrared heat signatures of prey in complete darkness.", wfreq:0.90 },
+  { id:'visible', name:'Visible Light', icon:'👁️', color:'#facc15', glow:'#ca8a04', wl:'380 – 700 nm', freq:'430 – 790 THz', energy:'1.77 – 3.26 eV', danger:'Safe (laser hazard)', dc:'#22c55e', disc:'Antiquity (Newton — 1666)', src:'Sun, stars, fire, bioluminescence', uses:['Human vision & photography','Fiber optic communications','Solar photovoltaic cells','Lasers in medicine & industry'], fact:'Visible light is only 0.0035% of the EM spectrum. Mantis shrimp have 16 types of photoreceptor cells versus our 3 — they can see colors and UV patterns completely invisible to humans. Some flowers have UV markings only bees can see.', wfreq:1.6 },
+  { id:'uv', name:'Ultraviolet', icon:'☀️', color:'#a855f7', glow:'#9333ea', wl:'10 – 380 nm', freq:'790 THz – 30 PHz', energy:'3.26 – 124 eV', danger:'Ionizing · DNA damage', dc:'#f97316', disc:'1801 — Johann Ritter', src:'Sun, hot stars, mercury arc lamps', uses:['UV-C surface sterilization','Counterfeit currency detection','Phototherapy for skin conditions','Observing hot stellar objects'], fact:"Earth's ozone layer blocks 97–99% of UV-C and UV-B. If it vanished, unprotected life on the surface would be sterilized in weeks. Scorpions glow teal-green under UV blacklights — scientists use this to find them at night.", wfreq:2.5 },
+  { id:'xray', name:'X-Rays', icon:'🦴', color:'#60a5fa', glow:'#3b82f6', wl:'0.01 – 10 nm', freq:'30 PHz – 30 EHz', energy:'124 eV – 124 keV', danger:'Ionizing · DNA damage risk', dc:'#ef4444', disc:'1895 — Wilhelm Röntgen', src:'Solar corona, black holes, neutron stars', uses:['Medical diagnostic imaging','Airport & cargo security','X-ray crystallography (DNA)','Chandra X-ray Observatory'], fact:"Rosalind Franklin's X-ray diffraction image 'Photo 51' (1952) was crucial evidence for Watson & Crick's discovery of DNA's double helix. Röntgen's wife famously said 'I have seen my death!' upon seeing her hand's bones and wedding ring.", wfreq:4.0 },
+  { id:'gamma', name:'Gamma Rays', icon:'☢️', color:'#10b981', glow:'#059669', wl:'<0.01 nm', freq:'>30 EHz', energy:'>124 keV', danger:'Highly ionizing · Lethal', dc:'#ef4444', disc:'1900 — Paul Villard', src:'Radioactive decay, supernovae, neutron star mergers', uses:['Gamma Knife radiosurgery','Medical equipment sterilization','PET scan imaging','Probing nuclear structure'], fact:'Gamma-ray bursts are the most energetic explosions in the universe. A GRB within ~6,000 light-years of Earth could strip our ozone layer in seconds. In 2022, GRB 221009A — nicknamed "the BOAT" (Brightest Of All Time) — was recorded.', wfreq:7.0 },
+];
+
+const QUIZ = [
+  // correct answer: A
+  { q:"Which property is the same for ALL types of electromagnetic waves when traveling through a vacuum?", a:"They all travel at the same speed (3×10⁸ m/s)", opts:["They all travel at the same speed (3×10⁸ m/s)","They all have the same wavelength","They all carry the same energy per photon","They all have the same frequency"], diff:"easy", exp:"All EM waves — radio, infrared, visible light, X-rays, gamma rays — travel at exactly c = 3×10⁸ m/s in a vacuum. They differ in wavelength, frequency, and energy, but speed in a vacuum is always the same." },
+  // correct answer: D
+  { q:"Which part of the EM spectrum has the MOST energy per photon?", a:"Gamma rays", opts:["Radio waves","Infrared","Ultraviolet","Gamma rays"], diff:"easy", exp:"Energy per photon increases with frequency (E = hν). Gamma rays have the highest frequency and shortest wavelength of all EM waves, giving them the most energy per photon — which is also why they are the most dangerous to living tissue." },
+  // correct answer: B
+  { q:"Your TV remote uses infrared light. Why does it stop working if you cover the front of the remote with your hand?", a:"Your hand absorbs and blocks the infrared beam before it can reach the TV sensor", opts:["Infrared cannot travel through air when obstructed","Your hand absorbs and blocks the infrared beam before it can reach the TV sensor","Body heat interferes with the remote's signal frequency","The remote switches to radio waves when blocked, which the TV can't detect"], diff:"easy", exp:"Infrared radiation travels in a straight line just like visible light and is absorbed by most solid objects, including your hand. Since the beam can't pass through, the TV sensor never receives the signal. This is why you need a clear line of sight between a remote and the device." },
+  // correct answer: C
+  { q:"Doctors use X-rays to image bones but MRI to image soft tissues like muscles and the brain. Why are X-rays less useful for soft tissue?", a:"X-rays pass through soft tissue with little absorption, creating almost no contrast in the image", opts:["X-rays are too dangerous to use near organs","Soft tissue is too thin to show up on any imaging technology","X-rays pass through soft tissue with little absorption, creating almost no contrast in the image","MRI uses X-rays at a lower dose, making it safer for repeated use"], diff:"easy", exp:"X-rays are absorbed mainly by dense, calcium-rich materials like bone. Soft tissues — mostly water — let X-rays pass right through, so there's very little contrast to form a useful image. MRI uses radio waves and a magnetic field to detect hydrogen atoms, which are abundant in soft tissue, giving far better detail." },
+  // correct answer: A
+  { q:"If you double the frequency of an EM wave, what happens to its wavelength?", a:"It is halved", opts:["It is halved","It doubles","It stays the same","It quadruples"], diff:"easy", exp:"From c = λν: if frequency doubles and the speed stays the same, wavelength must be halved to keep the equation balanced. Wavelength and frequency are always inversely proportional for EM waves." },
+  // correct answer: D
+  { q:"Which type of EM radiation does a standard microwave oven use to heat food, and why does it heat food from the inside?", a:"Microwaves — they penetrate several centimeters into food and cause water molecules throughout the food to vibrate", opts:["Infrared — it heats the surface, which conducts heat inward","Radio waves — they pass through completely without interacting","X-rays — they are energetic enough to excite food molecules deeply","Microwaves — they penetrate several centimeters into food and cause water molecules throughout the food to vibrate"], diff:"easy", exp:"Microwave ovens use 2.45 GHz microwaves that are tuned to couple with water molecules, causing them to rotate rapidly and generate heat. Because microwaves penetrate a few centimeters into food, heating happens throughout — not just at the surface like infrared from a conventional oven." },
+  // correct answer: B
+  { q:"The sky is blue during the day but turns red and orange at sunset. What causes this change?", a:"Blue light scatters more in the atmosphere; at sunset light travels a longer path, scattering away nearly all blue and leaving only red", opts:["The Sun cools down in the evening and emits more red light","Blue light scatters more in the atmosphere; at sunset light travels a longer path, scattering away nearly all blue and leaving only red","Oxygen glows blue in daylight and switches to red as temperature drops","Red light travels faster at low angles and reaches our eyes before blue light does"], diff:"medium", exp:"This is Rayleigh scattering — shorter (blue) wavelengths scatter much more strongly off air molecules than longer (red/orange) ones. During the day, scattered blue light fills the whole sky. At sunset, sunlight travels through a much thicker slice of atmosphere, scattering away nearly all the blue before it reaches you, leaving only the reds and oranges." },
+  // correct answer: C
+  { q:"Thermal cameras can 'see' people in complete darkness. What are they actually detecting?", a:"Infrared radiation naturally emitted by warm objects", opts:["Visible light reflected off people that is too faint for the human eye","Electrical signals produced by muscle activity","Infrared radiation naturally emitted by warm objects","Ultraviolet light reflected from skin"], diff:"easy", exp:"All objects above absolute zero (−273°C) emit EM radiation. At human body temperature (~37°C), this emission peaks in the infrared range. Thermal cameras detect these emitted infrared photons — no external light source is needed at all." },
+  // correct answer: D
+  { q:"Radio waves can pass through walls, but visible light cannot. What is the best explanation?", a:"Radio waves have much longer wavelengths and interact very weakly with the molecules in most building materials", opts:["Radio waves are a form of magnetism and pass through non-metal materials","Radio waves travel faster inside solid materials","Visible light is blocked specifically by the pigments used in paint and plaster","Radio waves have much longer wavelengths and interact very weakly with the molecules in most building materials"], diff:"medium", exp:"Whether EM radiation passes through a material depends on how strongly the material absorbs or reflects that wavelength. Building materials like drywall and brick are largely transparent to the long wavelengths of radio waves (centimeters to meters), but their molecular structure strongly absorbs the much shorter wavelengths of visible light." },
+  // correct answer: A
+  { q:"UV-B from the Sun is the main cause of sunburn. What makes UV-B more damaging to skin than the visible light that also reaches us?", a:"UV-B photons carry more energy and can be directly absorbed by DNA, breaking molecular bonds and causing cell damage", opts:["UV-B photons carry more energy and can be directly absorbed by DNA, breaking molecular bonds and causing cell damage","UV-B reflects off the ozone layer and becomes concentrated before hitting the skin","Visible light is cooler than UV-B because it has a lower frequency","UV-B travels slower than visible light and deposits more energy per unit time"], diff:"medium", exp:"UV-B (280–315 nm) photons carry enough energy (~4–5 eV) to be directly absorbed by DNA, creating damage that leads to sunburn and potentially skin cancer. Visible light photons carry less energy (~1.8–3.1 eV) and fall below the threshold needed to break the chemical bonds in DNA." },
+];
+
+let selWave=null, discovered=new Set(), qIdx=0, qScore=0, qAnswered=false, qDone=false, wavAnimId=null;
+
+// ── BACKGROUND ──
+(function(){
+  const cv=document.getElementById('bg-canvas');
+  const cx=cv.getContext('2d');
+  let W,H,pts=[];
+  function resize(){ W=cv.width=innerWidth; H=cv.height=innerHeight; }
+  resize(); addEventListener('resize',resize);
+  const cols=SPECTRUM.map(s=>s.color);
+  for(let i=0;i<55;i++) pts.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:Math.random()*1.4+0.3,c:cols[i%cols.length],vx:(Math.random()-.5)*.25,vy:(Math.random()-.5)*.25,o:Math.random()*.2+.05});
+  let t=0;
+  function draw(){
+    cx.clearRect(0,0,W,H); t+=.004;
+    SPECTRUM.forEach((s,i)=>{
+      cx.beginPath(); cx.strokeStyle=s.color; cx.globalAlpha=0.035; cx.lineWidth=1;
+      const f=(i+1)*.28, yb=H*(.15+i*.1);
+      for(let x=0;x<=W;x+=3){
+        const y=yb+Math.sin(x*.007*f+t+i)*28+Math.sin(x*.013+t*1.2)*12;
+        x===0?cx.moveTo(x,y):cx.lineTo(x,y);
+      }
+      cx.stroke();
+    });
+    cx.globalAlpha=1;
+    pts.forEach(p=>{
+      p.x+=p.vx; p.y+=p.vy;
+      if(p.x<0)p.x=W; if(p.x>W)p.x=0; if(p.y<0)p.y=H; if(p.y>H)p.y=0;
+      cx.beginPath(); cx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      cx.fillStyle=p.c; cx.globalAlpha=p.o; cx.fill();
+    });
+    cx.globalAlpha=1;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+function updateStats(){
+  const d=document.getElementById('chip-disc');
+  const s=document.getElementById('chip-score');
+  d.textContent=`🔭 ${discovered.size} / 7 discovered`;
+  d.className='stat-chip'+(discovered.size>0?' lit':'');
+  s.textContent=`🧠 Quiz: ${qScore} / 10`;
+  s.className='stat-chip'+(qScore>0?' lit':'');
+}
+
+function switchTab(t){
+  ['explore','compare','quiz'].forEach(id=>{
+    document.getElementById('panel-'+id).classList.toggle('active',id===t);
+    const b=document.getElementById('tab-'+id);
+    b.classList.toggle('active',id===t);
+  });
+}
+
+function drawWave(canvas,wave){
+  canvas.width=canvas.offsetWidth*devicePixelRatio||800;
+  canvas.height=canvas.offsetHeight*devicePixelRatio||60;
+  const cx=canvas.getContext('2d');
+  cx.scale(devicePixelRatio,devicePixelRatio);
+  const W=canvas.offsetWidth,H=canvas.offsetHeight;
+  let t=0;
+  if(wavAnimId)cancelAnimationFrame(wavAnimId);
+  function frame(){
+    cx.clearRect(0,0,W,H);
+    const f=wave.wfreq, amp=H*.3, mid=H/2;
+    const g=cx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,wave.color+'2a'); g.addColorStop(1,'transparent');
+    cx.fillStyle=g;
+    cx.beginPath(); cx.moveTo(0,mid);
+    for(let x=0;x<=W;x++){
+      const y=mid+Math.sin((x/W)*Math.PI*2*f*4+t)*amp+Math.sin((x/W)*Math.PI*2*f*2+t*.7)*amp*.3;
+      cx.lineTo(x,y);
+    }
+    cx.lineTo(W,H); cx.lineTo(0,H); cx.closePath(); cx.fill();
+    cx.beginPath(); cx.strokeStyle=wave.color; cx.lineWidth=2;
+    cx.shadowBlur=8; cx.shadowColor=wave.color;
+    for(let x=0;x<=W;x++){
+      const y=mid+Math.sin((x/W)*Math.PI*2*f*4+t)*amp+Math.sin((x/W)*Math.PI*2*f*2+t*.7)*amp*.3;
+      x===0?cx.moveTo(x,y):cx.lineTo(x,y);
+    }
+    cx.stroke(); cx.shadowBlur=0;
+    t+=.04; wavAnimId=requestAnimationFrame(frame);
+  }
+  frame();
+}
+
+function buildGrid(){
+  const g=document.getElementById('wave-grid'); g.innerHTML='';
+  SPECTRUM.forEach(w=>{
+    const c=document.createElement('div');
+    c.className='wave-card'+(selWave?.id===w.id?' selected':'');
+    c.style.cssText=`--wc:${w.color};`+(selWave?.id===w.id?`border-color:${w.color};box-shadow:0 0 0 1px ${w.color},0 12px 36px rgba(0,0,0,.5),0 0 28px ${w.color}28;background:linear-gradient(145deg,rgba(0,0,0,.6),${w.glow}22);`:'');
+    c.innerHTML=`<span class="wc-icon" style="color:${w.color}">${w.icon}</span><div class="wc-name" style="color:${selWave?.id===w.id?w.color:'#6b7280'}">${w.name}</div><div class="wc-dot ${discovered.has(w.id)?'show':''}"></div>`;
+    c.addEventListener('mouseenter',()=>{ if(selWave?.id!==w.id) c.style.background=`linear-gradient(145deg,rgba(0,0,0,.5),${w.glow}14)`; });
+    c.addEventListener('mouseleave',()=>{ if(selWave?.id!==w.id) c.style.background=''; });
+    c.onclick=()=>selectWave(w);
+    g.appendChild(c);
+  });
+}
+
+function selectWave(w){
+  selWave=w; discovered.add(w.id); updateStats(); buildGrid();
+  document.getElementById('placeholder').style.display='none';
+  const p=document.getElementById('detail-panel'); p.style.display='block';
+  p.innerHTML=`<div class="detail-panel" style="background:linear-gradient(135deg,rgba(8,13,24,.97),${w.glow}18);border:1px solid ${w.glow}33;">
+    <div class="detail-header">
+      <div class="dh-left">
+        <span class="big-icon" style="color:${w.color}">${w.icon}</span>
+        <div><div class="detail-name" style="color:${w.color}">${w.name}</div><div class="detail-disc">${w.disc}</div></div>
+      </div>
+      <div class="danger-badge" style="color:${w.dc};border-color:${w.dc}44;background:${w.dc}11">${w.danger}</div>
+    </div>
+    <div class="wave-strip"><canvas id="wcanvas" style="width:100%;height:100%;display:block;"></canvas></div>
+    <div class="props-grid">
+      ${[['Wavelength (λ)',w.wl],['Frequency (ν)',w.freq],['Photon Energy',w.energy],['Natural Sources',w.src]].map(([l,v])=>`<div class="prop-card"><div class="prop-label">${l}</div><div class="prop-value">${v}</div></div>`).join('')}
+    </div>
+    <div class="bottom-grid">
+      <div>${w.uses.map(u=>`<div class="use-item"><div class="use-dot" style="background:${w.color};box-shadow:0 0 4px ${w.color}"></div>${u}</div>`).join('')}</div>
+      <div class="fact-card" style="border-color:${w.glow}33"><div class="fact-label">⚡ Did You Know?</div><div class="fact-text">${w.fact}</div></div>
+    </div>
+  </div>`;
+  requestAnimationFrame(()=>{ const cv=document.getElementById('wcanvas'); if(cv)drawWave(cv,w); });
+}
+
+function buildCompare(){
+  const tb=document.getElementById('compare-tbody'); tb.innerHTML='';
+  SPECTRUM.forEach(w=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="font-weight:600;white-space:nowrap"><span style="margin-right:8px">${w.icon}</span><span style="color:${w.color}">${w.name}</span></td><td style="font-family:'JetBrains Mono',monospace;font-size:0.74rem">${w.wl}</td><td style="font-family:'JetBrains Mono',monospace;font-size:0.74rem">${w.freq}</td><td style="font-family:'JetBrains Mono',monospace;font-size:0.74rem">${w.energy}</td><td><span style="color:${w.dc};background:${w.dc}11;border:1px solid ${w.dc}33;border-radius:100px;padding:2px 10px;font-size:0.66rem;white-space:nowrap;font-family:'JetBrains Mono',monospace">${w.danger.split('·')[0].trim()}</span></td><td style="color:#cbd5e1;font-size:0.81rem">${w.uses[0]}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+function renderQuiz(){
+  const wrap=document.getElementById('quiz-wrap');
+  if(qDone){
+    const p=qScore/QUIZ.length;
+    const e=p>=.9?'🏆':p>=.7?'🎯':p>=.5?'📚':'🔬';
+    const m=p>=.9?"Exceptional! You have a deep understanding of EM physics — you're thinking like a physicist."
+      :p>=.7?"Strong performance! Review the missed questions and you'll master this material."
+      :p>=.5?"Solid foundation. Revisit the Explore tab to reinforce the concepts, then try again."
+      :"These are genuinely challenging questions. Use Explore and Compare to build your knowledge.";
+    wrap.innerHTML=`<div class="results-card"><div class="res-emoji">${e}</div><div class="res-score">${qScore}/${QUIZ.length}</div><div class="res-label">Final Score</div><div class="res-msg">${m}</div><button class="retry-btn" onclick="restartQuiz()">Try Again</button></div>`;
+    return;
+  }
+  const q=QUIZ[qIdx]; const L=['A','B','C','D'];
+  const diffLabel=q.diff==='hard'?'●●● HARD':q.diff==='medium'?'●● MEDIUM':'● EASY';
+  wrap.innerHTML=`<div class="qhdr"><div class="q-counter">Question ${qIdx+1} of ${QUIZ.length}</div><div class="q-live-score">Score: ${qScore}</div></div>
+    <div class="q-progress"><div class="q-prog-fill" style="width:${(qIdx/QUIZ.length)*100}%"></div></div>
+    <div class="diff-badge diff-${q.diff}">${diffLabel}</div>
+    <div class="q-question">${q.q}</div>
+    <div class="q-opts">${q.opts.map((o,i)=>`<button class="q-opt" id="qo${i}" onclick="answerQ(${i})"><span class="opt-let" id="ql${i}">${L[i]}</span>${o}</button>`).join('')}</div>
+    <div id="q-exp" style="display:none" class="q-explain"></div>
+    <div id="q-next" style="display:none;overflow:hidden"><button class="q-next" onclick="nextQ()">${qIdx+1>=QUIZ.length?'See Results →':'Next Question →'}</button></div>`;
+}
+
+function answerQ(idx){
+  if(qAnswered)return; qAnswered=true;
+  const q=QUIZ[qIdx], ci=q.opts.indexOf(q.a);
+  if(q.opts[idx]===q.a){ qScore++; updateStats(); }
+  q.opts.forEach((_,i)=>{
+    const b=document.getElementById('qo'+i); b.disabled=true;
+    if(i===ci)b.classList.add('correct');
+    else if(i===idx&&idx!==ci)b.classList.add('wrong');
+  });
+  const e=document.getElementById('q-exp'); e.style.display='block';
+  e.innerHTML=`<strong>${q.opts[idx]===q.a?'✓ Correct!':'✗ Incorrect.'}</strong> ${q.exp}`;
+  document.getElementById('q-next').style.display='block';
+}
+
+function nextQ(){
+  if(qIdx+1>=QUIZ.length)qDone=true; else{qIdx++;qAnswered=false;}
+  renderQuiz();
+}
+
+function restartQuiz(){
+  qIdx=0;qScore=0;qAnswered=false;qDone=false;updateStats();renderQuiz();
+}
+
+buildGrid(); buildCompare(); renderQuiz(); updateStats();
+</script>
+</body>
+</html>
